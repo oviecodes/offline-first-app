@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offline Notes App</title>
+    <link rel="stylesheet" href="index.css">
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📝 Offline Notes</h1>
+            <div class="status-bar">
+                <div class="status" id="networkStatus">
+                    <span id="networkStatusText">Checking...</span>
+                </div>
+                <div class="status sync-status" id="syncStatus">
+                    <span id="syncStatusText">Ready</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="demo-notice">
+            <strong>Testing Instructions:</strong>
+            1. Create some notes while online<br>
+            2. Turn off your network (WiFi/Ethernet) or use DevTools → Network → Offline<br>
+            3. Create/edit more notes - they work offline!<br>
+            4. Turn network back on - changes sync automatically<br>
+            <br>
+            <strong>Note:</strong> Update API_URL in the code to your ngrok URL for remote testing.
+        </div>
+
+        <div class="editor-card">
+            <h2>Create New Note</h2>
+            <textarea id="noteInput" placeholder="Write your note here..."></textarea>
+            <button class="btn" id="createBtn">Save Note</button>
+            <button class="btn btn-secondary" id="syncBtn">Sync Now</button>
+        </div>
+
+        <div class="notes-list" id="notesList"></div>
+    </div>
+
+    <script type="module" src="scripts.js"></script>
+
+</body>
+
+</html>
