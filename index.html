@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offline Notes App</title>
+    <link rel="stylesheet" href="index.css">
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📝 Offline Notes</h1>
+            <div class="status" id="status">
+                <span id="statusText">Checking...</span>
+            </div>
+        </div>
+
+        <div class="demo-notice">
+            <strong>Demo Features:</strong> This app works completely offline using IndexedDB. Try going offline
+            (disconnect your network or use DevTools) and create/edit notes - they'll be saved locally. Data persists
+            across page refreshes!
+        </div>
+
+        <div class="editor-card">
+            <h2>Create New Note</h2>
+            <textarea id="noteInput" placeholder="Write your note here..."></textarea>
+            <button class="btn" id="createBtn">Save Note</button>
+        </div>
+
+        <div class="notes-list" id="notesList"></div>
+    </div>
+
+    <script src="scripts.js"></script>
+</body>
+
+</html>
