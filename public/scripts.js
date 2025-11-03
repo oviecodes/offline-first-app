@@ -1,4 +1,7 @@
-const API_URL = "http://localhost:3000/api"
+// Configuration
+const API_URL = "http://localhost:3000/api" // UPDATE THIS if using ngrok
+
+// IndexedDB wrapper
 class NotesDB {
   constructor() {
     this.db = null
@@ -156,41 +159,13 @@ class NotesDB {
     })
   }
 
-  async getSyncQueue() {
+  async getSyncQueueCount() {
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction(["syncQueue"], "readonly")
       const store = tx.objectStore("syncQueue")
-      const request = store.getAll()
+      const request = store.count()
 
       request.onsuccess = () => resolve(request.result)
-      request.onerror = () => reject(request.error)
-    })
-  }
-
-  async clearSyncQueue() {
-    return new Promise((resolve, reject) => {
-      const tx = this.db.transaction(["syncQueue"], "readwrite")
-      const store = tx.objectStore("syncQueue")
-      const request = store.clear()
-
-      request.onsuccess = () => resolve()
-      request.onerror = () => reject(request.error)
-    })
-  }
-
-  async markNoteSynced(clientId, serverId) {
-    const note = await this.getNoteByClientId(clientId)
-    if (!note) return
-
-    note.synced = true
-    note.serverId = serverId
-
-    return new Promise((resolve, reject) => {
-      const tx = this.db.transaction(["notes"], "readwrite")
-      const store = tx.objectStore("notes")
-      const request = store.put(note)
-
-      request.onsuccess = () => resolve()
       request.onerror = () => reject(request.error)
     })
   }
@@ -199,7 +174,7 @@ class NotesDB {
 // App state
 const db = new NotesDB()
 let editingNoteId = null
-let isSyncing = false
+let swRegistration = null
 
 // UI updates
 function updateNetworkStatus() {
@@ -209,20 +184,28 @@ function updateNetworkStatus() {
   if (navigator.onLine) {
     status.className = "status online"
     statusText.textContent = "🟢 Online"
-    // Auto-sync when coming back online
-    setTimeout(() => syncToServer(), 1000)
+
+    // Trigger background sync when coming online
+    triggerBackgroundSync()
   } else {
     status.className = "status offline"
     statusText.textContent = "🔴 Offline"
   }
 }
 
-function updateSyncStatus(message, type = "ready") {
+async function updateSyncStatus() {
   const status = document.getElementById("syncStatus")
   const statusText = document.getElementById("syncStatusText")
 
-  status.className = `status sync-status ${type}`
-  statusText.innerHTML = message
+  const queueCount = await db.getSyncQueueCount()
+
+  if (queueCount === 0) {
+    status.className = "status sync-status synced"
+    statusText.textContent = "✓ All synced"
+  } else {
+    status.className = "status sync-status"
+    statusText.textContent = `⟳ ${queueCount} pending`
+  }
 }
 
 function formatDate(timestamp) {
@@ -247,17 +230,53 @@ function escapeHtml(text) {
   return div.innerHTML
 }
 
+// async function renderNotes() {
+//   const notesList = document.getElementById("notesList")
+//   const notes = await db.getAllNotes()
+
+//   if (notes.length === 0) {
+//     notesList.innerHTML = `
+
+//         No notes yet
+//         Create your first note above to get started!
+
+//     `
+//     return
+//   }
+
+//   notes.sort((a, b) => b.updated - a.updated)
+
+//   notesList.innerHTML = notes
+//     .map(
+//       (note) => `
+
+//         ${formatDate(note.updated)}
+
+//           ${note.synced ? "✓ Synced" : "⟳ Pending"}
+
+//       ${escapeHtml(note.content)}
+
+//         Edit
+//         Delete
+
+//   `
+//     )
+//     .join("")
+
+//   await updateSyncStatus()
+// }
+
 async function renderNotes() {
   const notesList = document.getElementById("notesList")
   const notes = await db.getAllNotes()
 
   if (notes.length === 0) {
     notesList.innerHTML = `
-      <div class="empty-state">
-        <h3>No notes yet</h3>
-        <p>Create your first note above to get started!</p>
-      </div>
-    `
+        <div class="empty-state">
+          <h3>No notes yet</h3>
+          <p>Create your first note above to get started!</p>
+        </div>
+      `
     return
   }
 
@@ -266,24 +285,24 @@ async function renderNotes() {
   notesList.innerHTML = notes
     .map(
       (note) => `
-    <div class="note-card ${!note.synced ? "pending-sync" : ""}">
-      <div class="note-header">
-        <div class="note-time">${formatDate(note.updated)}</div>
-        <div class="note-badge ${note.synced ? "synced" : "pending"}">
-          ${note.synced ? "✓ Synced" : "⟳ Pending"}
+      <div class="note-card ${!note.synced ? "pending-sync" : ""}">
+        <div class="note-header">
+          <div class="note-time">${formatDate(note.updated)}</div>
+          <div class="note-badge ${note.synced ? "synced" : "pending"}">
+            ${note.synced ? "✓ Synced" : "⟳ Pending"}
+          </div>
+        </div>
+        <div class="note-content">${escapeHtml(note.content)}</div>
+        <div class="note-actions">
+          <button class="btn btn-small" onclick="editNote('${
+            note.clientId
+          }')">Edit</button>
+          <button class="btn btn-small btn-delete" onclick="deleteNote('${
+            note.clientId
+          }')">Delete</button>
         </div>
       </div>
-      <div class="note-content">${escapeHtml(note.content)}</div>
-      <div class="note-actions">
-        <button class="btn btn-small" onclick="editNote('${
-          note.clientId
-        }')">Edit</button>
-        <button class="btn btn-small btn-delete" onclick="deleteNote('${
-          note.clientId
-        }')">Delete</button>
-      </div>
-    </div>
-  `
+    `
     )
     .join("")
 }
@@ -308,10 +327,8 @@ async function createOrUpdateNote() {
   input.value = ""
   await renderNotes()
 
-  // Try to sync if online
-  if (navigator.onLine) {
-    setTimeout(() => syncToServer(), 500)
-  }
+  // Trigger background sync
+  triggerBackgroundSync()
 }
 
 window.editNote = async function (clientId) {
@@ -327,89 +344,56 @@ window.deleteNote = async function (clientId) {
     await db.deleteNote(clientId)
     await renderNotes()
 
-    // Try to sync if online
-    if (navigator.onLine) {
-      setTimeout(() => syncToServer(), 500)
-    }
+    // Trigger background sync
+    triggerBackgroundSync()
   }
 }
 
-async function syncToServer() {
-  if (!navigator.onLine || isSyncing) return
-
-  const queue = await db.getSyncQueue()
-  if (queue.length === 0) {
-    updateSyncStatus("All synced", "synced")
+// Service Worker registration and background sync
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    console.log("Service Workers not supported")
+    document.getElementById("swStatusText").textContent = "SW: Not supported"
     return
   }
 
-  isSyncing = true
-  updateSyncStatus(
-    `<span class="spinning">⟳</span> Syncing ${queue.length} change(s)...`,
-    "syncing"
-  )
-
   try {
-    // Process sync queue
-    for (const operation of queue) {
-      try {
-        if (operation.type === "create") {
-          const response = await fetch(`${API_URL}/notes`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              content: operation.content,
-              clientId: operation.clientId,
-              created: operation.created,
-              updated: operation.updated,
-            }),
-          })
+    swRegistration = await navigator.serviceWorker.register("/sw.js")
+    console.log("Service Worker registered:", swRegistration)
+    document.getElementById("swStatusText").textContent = "⚡ SW: Active"
 
-          if (response.ok) {
-            const serverNote = await response.json()
-            await db.markNoteSynced(operation.clientId, serverNote.id)
-          }
-        } else if (operation.type === "update" && operation.serverId) {
-          const response = await fetch(
-            `${API_URL}/notes/${operation.serverId}`,
-            {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                content: operation.content,
-                updated: operation.updated,
-              }),
-            }
-          )
-
-          if (response.ok) {
-            await db.markNoteSynced(operation.clientId, operation.serverId)
-          }
-        } else if (operation.type === "delete" && operation.serverId) {
-          await fetch(`${API_URL}/notes/${operation.serverId}`, {
-            method: "DELETE",
-          })
-        }
-      } catch (error) {
-        console.error("Failed to sync operation:", operation, error)
-        throw error // Stop syncing if one fails
+    // Listen for messages from SW
+    navigator.serviceWorker.addEventListener("message", (event) => {
+      if (event.data.type === "SYNC_COMPLETE") {
+        console.log("Background sync completed!")
+        renderNotes() // Refresh UI
       }
-    }
-
-    // Clear sync queue
-    await db.clearSyncQueue()
-    updateSyncStatus("✓ All synced", "synced")
-    await renderNotes()
+    })
   } catch (error) {
-    console.error("Sync failed:", error)
-    updateSyncStatus("⚠ Sync failed - will retry", "ready")
-  } finally {
-    isSyncing = false
+    console.error("Service Worker registration failed:", error)
+    document.getElementById("swStatusText").textContent = "SW: Failed"
   }
 }
 
+async function triggerBackgroundSync() {
+  if (!swRegistration || !navigator.onLine) return
+
+  try {
+    if ("sync" in swRegistration) {
+      await swRegistration.sync.register("sync-notes")
+      console.log("Background sync registered")
+    } else {
+      console.log("Background Sync API not supported")
+    }
+  } catch (error) {
+    console.error("Failed to register background sync:", error)
+  }
+}
+
+// Initialize app
 async function init() {
   await db.init()
+  await registerServiceWorker()
   await renderNotes()
   updateNetworkStatus()
 
@@ -417,13 +401,6 @@ async function init() {
   document
     .getElementById("createBtn")
     .addEventListener("click", createOrUpdateNote)
-  document.getElementById("syncBtn").addEventListener("click", () => {
-    if (navigator.onLine) {
-      syncToServer()
-    } else {
-      alert("Cannot sync while offline")
-    }
-  })
 
   document.getElementById("noteInput").addEventListener("keydown", (e) => {
     if (e.ctrlKey && e.key === "Enter") {
@@ -432,8 +409,6 @@ async function init() {
   })
 
   // Network status listeners
-  // window.addEventListener('online', updateNetwork
-
   window.addEventListener("online", updateNetworkStatus)
   window.addEventListener("offline", updateNetworkStatus)
 }
